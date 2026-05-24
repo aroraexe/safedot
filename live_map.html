@@ -347,7 +347,8 @@
             border: 1px solid var(--border-color);
         }
 
-            @media (max-width: 480px) {
+        /* Premium Mobile Responsiveness Queries */
+        @media (max-width: 480px) {
             header {
                 top: 10px;
                 left: 10px;
@@ -365,7 +366,7 @@
             }
 
             .leaflet-top {
-                top: 70px !important; /* Move map controls higher on mobile to fit tight spacing */
+                top: 70px !important;
             }
 
             #info-panel {
@@ -726,7 +727,6 @@
                 });
         }
 
-        // Handle Map and Marker Transitions smoothly
         function updateUIAndMap(lat, lon, alt, timestamp) {
             // Update stats
             document.getElementById("stat-lat").innerText = lat.toFixed(6);
