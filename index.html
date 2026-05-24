@@ -462,7 +462,7 @@
         let coordinatesHistory = [];
         let trackerId = "";
         let isFirstLoad = true;
-        let trackerWorker;
+        let eventSource = null;
 
         // Custom Configuration
         const FIREBASE_HOST = "safedot-73b43-default-rtdb.firebaseio.com";
