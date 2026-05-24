@@ -463,6 +463,7 @@
         let trackerId = "";
         let isFirstLoad = true;
         let eventSource = null;
+        let pollingInterval = null;
 
         // Custom Configuration
         const FIREBASE_HOST = "safedot-73b43-default-rtdb.firebaseio.com";
@@ -557,60 +558,126 @@
             }
         }
 
-        // Main-thread high-reliability real-time SSE listener (bypasses background worker suspension)
+        // Main-thread high-reliability self-healing real-time sync with HTTP polling fallback
         function initFirebaseStream() {
             const statusPulse = document.getElementById("status-pulse");
             const connectionStatus = document.getElementById("connection-status");
+            let fallbackActive = false;
 
+            // Clear any existing connections or intervals
             if (eventSource) {
-                eventSource.close();
+                try { eventSource.close(); } catch(e) {}
+            }
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
             }
 
             const url = "https://" + FIREBASE_HOST + "/trackers/" + trackerId + ".json?auth=j5M7TpiXTb6rYaItUnFIwtXE2aIJnkdSKQQ6dkNr";
-            eventSource = new EventSource(url);
 
-            const handleUpdate = (event) => {
-                try {
-                    const packet = JSON.parse(event.data);
-                    if (!packet) return;
-                    
-                    let coords = null;
-                    // Firebase REST streams put/patch can return coords under .data or root depending on SSE scope
-                    if (packet.path === "/" || packet.path === "") {
-                        coords = packet.data;
-                    } else if (packet.data && typeof packet.data === 'object' && packet.data.lat && packet.data.lon) {
-                        coords = packet.data;
-                    }
-                    
-                    if (coords && coords.lat && coords.lon) {
-                        const lat = parseFloat(coords.lat);
-                        const lon = parseFloat(coords.lon);
-                        const alt = parseFloat(coords.alt || 0);
-                        const timestamp = new Date();
-
-                        if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
-                            updateUIAndMap(lat, lon, alt, timestamp);
-                            statusPulse.style.backgroundColor = "#10b981"; // Success green
-                            connectionStatus.innerText = "Real-time Live Sync";
-                        }
-                    }
-                } catch (err) {
-                    console.error("Error parsing Firebase stream update:", err);
+            // Start a 4-second timeout to fall back to HTTP polling if SSE is blocked or stuck
+            const fallbackTimeout = setTimeout(() => {
+                if (!fallbackActive) {
+                    console.warn("SSE stream initialization timed out. Falling back to HTTP polling...");
+                    startHttpPolling();
                 }
-            };
+            }, 4000);
 
-            eventSource.addEventListener('put', handleUpdate);
-            eventSource.addEventListener('patch', handleUpdate);
+            try {
+                eventSource = new EventSource(url);
 
-            eventSource.onopen = function() {
-                statusPulse.style.backgroundColor = "#10b981";
-                connectionStatus.innerText = "Ready, listening for lock...";
-            };
+                const handleUpdate = (event) => {
+                    try {
+                        const packet = JSON.parse(event.data);
+                        if (!packet) return;
+                        
+                        let coords = null;
+                        if (packet.path === "/" || packet.path === "") {
+                            coords = packet.data;
+                        } else if (packet.data && typeof packet.data === 'object' && packet.data.lat && packet.data.lon) {
+                            coords = packet.data;
+                        }
+                        
+                        if (coords && coords.lat && coords.lon) {
+                            const lat = parseFloat(coords.lat);
+                            const lon = parseFloat(coords.lon);
+                            const alt = parseFloat(coords.alt || 0);
 
-            eventSource.onerror = function() {
-                statusPulse.style.backgroundColor = "#ef4444"; // Error red
-                connectionStatus.innerText = "Reconnecting...";
-            };
+                            if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+                                updateUIAndMap(lat, lon, alt, new Date());
+                                statusPulse.style.backgroundColor = "#10b981"; // Success green
+                                connectionStatus.innerText = "Real-time Live Sync (Stream)";
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error parsing Firebase stream update:", err);
+                    }
+                };
+
+                eventSource.addEventListener('put', handleUpdate);
+                eventSource.addEventListener('patch', handleUpdate);
+
+                eventSource.onopen = function() {
+                    clearTimeout(fallbackTimeout);
+                    if (!fallbackActive) {
+                        statusPulse.style.backgroundColor = "#10b981";
+                        connectionStatus.innerText = "Ready, listening for lock...";
+                    }
+                };
+
+                eventSource.onerror = function() {
+                    if (!fallbackActive) {
+                        console.warn("SSE stream error. Attempting HTTP polling fallback...");
+                        clearTimeout(fallbackTimeout);
+                        startHttpPolling();
+                    }
+                };
+
+            } catch (err) {
+                console.error("Failed to construct EventSource:", err);
+                clearTimeout(fallbackTimeout);
+                startHttpPolling();
+            }
+
+            function startHttpPolling() {
+                if (fallbackActive) return;
+                fallbackActive = true;
+                
+                if (eventSource) {
+                    try { eventSource.close(); } catch(e) {}
+                }
+
+                connectionStatus.innerText = "Real-time Live Sync (Active)";
+                statusPulse.style.backgroundColor = "#eab308"; // Warning yellow to show active fallback
+
+                // Perform immediate first fetch
+                fetchCoordinatesViaHttp();
+
+                // Poll every 3 seconds for battery conservation and network stability
+                pollingInterval = setInterval(fetchCoordinatesViaHttp, 3000);
+            }
+
+            function fetchCoordinatesViaHttp() {
+                fetch(url)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.lat && data.lon) {
+                            const lat = parseFloat(data.lat);
+                            const lon = parseFloat(data.lon);
+                            const alt = parseFloat(data.alt || 0);
+
+                            if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+                                updateUIAndMap(lat, lon, alt, new Date());
+                                statusPulse.style.backgroundColor = "#10b981"; // Reset to green on success
+                                connectionStatus.innerText = "Real-time Live Sync (Active)";
+                            }
+                        }
+                    })
+                    .catch(err => {
+                        console.error("HTTP fallback polling error:", err);
+                        statusPulse.style.backgroundColor = "#ef4444"; // Error red
+                        connectionStatus.innerText = "Reconnecting...";
+                    });
+            }
         }
 
         // Fallback standard rapid polling for offline local AP server mode
