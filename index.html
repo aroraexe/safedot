@@ -262,6 +262,11 @@
             background: #0b0f19 !important;
         }
 
+        .leaflet-top {
+            top: 90px !important; /* Push controls below the absolute positioned header */
+            transition: top 0.3s;
+        }
+
         .leaflet-control-zoom {
             border: 1px solid var(--border-color) !important;
             box-shadow: none !important;
@@ -274,10 +279,43 @@
             color: var(--text-primary) !important;
             border-bottom: 1px solid var(--border-color) !important;
             backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
         }
 
         .leaflet-control-zoom-in:hover, .leaflet-control-zoom-out:hover {
             background: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        /* Glassmorphism Map Control Layer Switcher */
+        .leaflet-control-layers {
+            background: var(--card-bg) !important;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color) !important;
+            border-radius: 12px !important;
+            color: var(--text-primary) !important;
+            font-family: 'Outfit', sans-serif;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+            padding: 6px 10px !important;
+        }
+
+        .leaflet-control-layers-expanded {
+            padding: 10px 14px !important;
+        }
+
+        .leaflet-control-layers-list label {
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .leaflet-control-layers-selector {
+            margin-top: 0 !important;
+            accent-color: var(--accent-color);
+            cursor: pointer;
         }
 
         .custom-popup .leaflet-popup-content-wrapper {
@@ -291,6 +329,72 @@
         .custom-popup .leaflet-popup-tip {
             background: var(--bg-color);
             border: 1px solid var(--border-color);
+        }
+
+        /* Premium Mobile Responsiveness Queries */
+        @media (max-width: 480px) {
+            header {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                padding: 10px 15px;
+                border-radius: 12px;
+            }
+
+            .logo-section h1 {
+                font-size: 1.2rem;
+            }
+
+            #connection-status {
+                font-size: 0.75rem !important;
+            }
+
+            .leaflet-top {
+                top: 70px !important; /* Move map controls higher on mobile to fit tight spacing */
+            }
+
+            #info-panel {
+                bottom: 15px;
+                left: 10px;
+                right: 10px;
+                transform: none;
+                width: calc(100% - 20px);
+                padding: 15px;
+                gap: 10px;
+                border-radius: 16px;
+            }
+
+            #info-panel > div:first-child {
+                font-size: 0.95rem !important;
+            }
+
+            #last-update {
+                font-size: 0.7rem !important;
+            }
+
+            .stats-grid {
+                gap: 8px;
+            }
+
+            .stat-card {
+                padding: 8px 4px;
+                border-radius: 10px;
+            }
+
+            .stat-label {
+                font-size: 0.65rem;
+                margin-bottom: 2px;
+            }
+
+            .stat-value {
+                font-size: 0.85rem;
+            }
+
+            .btn {
+                padding: 10px 15px;
+                font-size: 0.9rem;
+                border-radius: 10px;
+            }
         }
     </style>
 </head>
@@ -395,16 +499,46 @@
         function startTracking(isLocal) {
             document.getElementById("display-tracker-id").innerText = trackerId.toUpperCase();
             
-            // Initialize Leaflet Map (Centered on default coordinates first)
+            // Initialize Leaflet Map with zoomControl disabled to avoid header overlap
             map = L.map('map', {
-                zoomControl: true,
+                zoomControl: false,
                 attributionControl: false
             }).setView([20.5937, 78.9629], 5); // Center of India default
 
-            // Load Premium Dark Map Tiles (CartoDB Dark Matter - Free and Keyless)
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                maxZoom: 20
-            }).addTo(map);
+            // Define map layers for high-detail switcher (Free, Keyless, Premium)
+            const darkMatter = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 20,
+                attribution: '&copy; CartoDB'
+            });
+
+            const detailedStreets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap'
+            });
+
+            const satelliteHybrid = L.layerGroup([
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19,
+                    attribution: '&copy; Esri'
+                }),
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19,
+                    attribution: '&copy; Esri'
+                })
+            ]);
+
+            // Add default base layer
+            darkMatter.addTo(map);
+
+            const baseMaps = {
+                "🌌 Dark Mode": darkMatter,
+                "🗺️ Detailed Streets": detailedStreets,
+                "🛰️ Satellite Hybrid": satelliteHybrid
+            };
+
+            // Add premium controls to topright
+            L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+            L.control.zoom({ position: 'topright' }).addTo(map);
 
             // Initialize Trail Polyline
             pathLine = L.polyline([], {
@@ -418,90 +552,64 @@
                 // If running locally, fall back to standard rapid AJAX polling to ESP32 API
                 setInterval(fetchLocalCoordinates, 1000);
             } else {
-                // Initialize high-speed, non-blocking Multi-threaded Web Worker & WebSocket (Server Sent Events)
-                initWebSocketWorker();
+                // Main-thread native EventSource listening (bypasses background CPU/worker throttling)
+                initFirebaseStream();
             }
         }
 
-        // Multithreaded Web Worker for 0% Main-Thread UI stuttering
-        function initWebSocketWorker() {
-            const workerCode = `
-                let eventSource = null;
-                let isConnected = false;
+        // Main-thread high-reliability real-time SSE listener (bypasses background worker suspension)
+        function initFirebaseStream() {
+            const statusPulse = document.getElementById("status-pulse");
+            const connectionStatus = document.getElementById("connection-status");
 
-                self.onmessage = function(e) {
-                    if (e.data.type === 'START') {
-                        connectToFirebase(e.data.host, e.data.trackerId);
-                    }
-                };
+            if (eventSource) {
+                eventSource.close();
+            }
 
-                function connectToFirebase(host, id) {
-                    if (eventSource) eventSource.close();
+            const url = "https://" + FIREBASE_HOST + "/trackers/" + trackerId + ".json?auth=j5M7TpiXTb6rYaItUnFIwtXE2aIJnkdSKQQ6dkNr";
+            eventSource = new EventSource(url);
+
+            const handleUpdate = (event) => {
+                try {
+                    const packet = JSON.parse(event.data);
+                    if (!packet) return;
                     
-                    const url = "https://" + host + "/trackers/" + id + ".json?auth=j5M7TpiXTb6rYaItUnFIwtXE2aIJnkdSKQQ6dkNr";
-                    eventSource = new EventSource(url);
+                    let coords = null;
+                    // Firebase REST streams put/patch can return coords under .data or root depending on SSE scope
+                    if (packet.path === "/" || packet.path === "") {
+                        coords = packet.data;
+                    } else if (packet.data && typeof packet.data === 'object' && packet.data.lat && packet.data.lon) {
+                        coords = packet.data;
+                    }
                     
-                    eventSource.addEventListener('put', function(event) {
-                        const data = JSON.parse(event.data);
-                        if (data && data.data) {
-                            self.postMessage({ type: 'UPDATE', coordinates: data.data });
+                    if (coords && coords.lat && coords.lon) {
+                        const lat = parseFloat(coords.lat);
+                        const lon = parseFloat(coords.lon);
+                        const alt = parseFloat(coords.alt || 0);
+                        const timestamp = new Date();
+
+                        if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+                            updateUIAndMap(lat, lon, alt, timestamp);
+                            statusPulse.style.backgroundColor = "#10b981"; // Success green
+                            connectionStatus.innerText = "Real-time Live Sync";
                         }
-                    });
-
-                    eventSource.addEventListener('patch', function(event) {
-                        const data = JSON.parse(event.data);
-                        if (data && data.data) {
-                            self.postMessage({ type: 'UPDATE', coordinates: data.data });
-                        }
-                    });
-
-                    eventSource.onopen = function() {
-                        self.postMessage({ type: 'STATUS', status: 'connected' });
-                    };
-
-                    eventSource.onerror = function() {
-                        self.postMessage({ type: 'STATUS', status: 'error' });
-                    };
-                }
-            `;
-
-            const blob = new Blob([workerCode], { type: 'application/javascript' });
-            const workerUrl = URL.createObjectURL(blob);
-            trackerWorker = new Worker(workerUrl);
-
-            // Start background thread socket listening
-            trackerWorker.postMessage({
-                type: 'START',
-                host: FIREBASE_HOST,
-                trackerId: trackerId
-            });
-
-            // Handle incoming coordinate packets from background Web Worker thread (Message Queue)
-            trackerWorker.onmessage = function(e) {
-                const statusPulse = document.getElementById("status-pulse");
-                const connectionStatus = document.getElementById("connection-status");
-
-                if (e.data.type === 'UPDATE') {
-                    const coords = e.data.coordinates;
-                    const lat = parseFloat(coords.lat);
-                    const lon = parseFloat(coords.lon);
-                    const alt = parseFloat(coords.alt || 0);
-                    const timestamp = new Date();
-
-                    if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
-                        updateUIAndMap(lat, lon, alt, timestamp);
-                        statusPulse.style.backgroundColor = "#10b981"; // Success green
-                        connectionStatus.innerText = "Real-time Live Sync";
                     }
-                } else if (e.data.type === 'STATUS') {
-                    if (e.data.status === 'connected') {
-                        statusPulse.style.backgroundColor = "#10b981";
-                        connectionStatus.innerText = "Ready, listening for lock...";
-                    } else {
-                        statusPulse.style.backgroundColor = "#ef4444"; // Error red
-                        connectionStatus.innerText = "Reconnecting...";
-                    }
+                } catch (err) {
+                    console.error("Error parsing Firebase stream update:", err);
                 }
+            };
+
+            eventSource.addEventListener('put', handleUpdate);
+            eventSource.addEventListener('patch', handleUpdate);
+
+            eventSource.onopen = function() {
+                statusPulse.style.backgroundColor = "#10b981";
+                connectionStatus.innerText = "Ready, listening for lock...";
+            };
+
+            eventSource.onerror = function() {
+                statusPulse.style.backgroundColor = "#ef4444"; // Error red
+                connectionStatus.innerText = "Reconnecting...";
             };
         }
 
